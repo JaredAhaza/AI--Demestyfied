@@ -255,6 +255,27 @@ def render_mode_selection():
         </div>
         """, unsafe_allow_html=True)
 
+    # Quick Actions Section
+    st.markdown("### ⚡ Quick Answers")
+    st.markdown("Skip setup and ask a common question:")
+    
+    q_col1, q_col2 = st.columns(2)
+    
+    quick_topics = [
+        "How do I set up my environment?",
+        "What's the deployment process?",
+        "Who should I contact for help?",
+        "What tools does the team use?"
+    ]
+    
+    for i, topic in enumerate(quick_topics):
+        col = q_col1 if i % 2 == 0 else q_col2
+        with col:
+            if st.button(topic, key=f"main_quick_{i}", use_container_width=True):
+                st.session_state.mode = "knowledge"
+                st.session_state.messages.append({"role": "user", "content": topic})
+                st.rerun()
+
 def render_chat():
     """Render the chat interface."""
     # Mode indicator
@@ -287,6 +308,25 @@ def render_chat():
                     <div class="assistant-message">{message["content"]}</div>
                 </div>
                 """, unsafe_allow_html=True)
+                
+                # Render sources
+                if "sources" in message and message["sources"]:
+                    with st.expander("📚 Sources & Citations"):
+                        for i, source in enumerate(message["sources"]):
+                            st.markdown(f"**{i+1}. {source['source']}**")
+                            st.caption(source['content'][:200] + "...")
+                
+                # Feedback & Attributes
+                if message.get("role") == "assistant" and not message.get("is_voice"):
+                    cols = st.columns([1, 1, 5])
+                    with cols[0]:
+                        st.button("👍", key=f"up_{message['content'][:10]}", help="Helpful")
+                    with cols[1]:
+                        st.button("👎", key=f"down_{message['content'][:10]}", help="Not helpful")
+
+                # Render audio if present
+                if "audio" in message:
+                    st.audio(message["audio"], format='audio/mp3')
     
     # Chat input
     user_input = st.chat_input("Ask me anything about the team...")
@@ -294,26 +334,69 @@ def render_chat():
     if user_input:
         # Add user message
         st.session_state.messages.append({"role": "user", "content": user_input})
-        
-        # Generate response using RAG
-        try:
-            rag_engine = initialize_rag()
-            
-            # Add context based on mode
-            context_prefix = ""
-            if st.session_state.mode == "onboarding":
-                context_prefix = "The user is a new team member going through onboarding. Be welcoming, patient, and thorough in explanations. "
-            else:
-                context_prefix = "The user is looking for quick information from team documentation. Be concise and direct. "
-            
-            response = rag_engine.query(user_input, context_prefix)
-            st.session_state.messages.append({"role": "assistant", "content": response})
-            
-        except Exception as e:
-            error_msg = f"I encountered an error: {str(e)}\n\nPlease make sure your IBM API key is configured correctly in the `.env` file."
-            st.session_state.messages.append({"role": "assistant", "content": error_msg})
-        
         st.rerun()
+
+    # Generate response if last message is from user
+    if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+        with st.spinner("Thinking..."):
+            try:
+                # Get last user message
+                last_user_input = st.session_state.messages[-1]["content"]
+                
+                rag_engine = initialize_rag()
+                
+                # Add context based on mode
+                context_prefix = ""
+                if st.session_state.mode == "onboarding":
+                    context_prefix = "The user is a new team member going through onboarding. Be welcoming, patient, and thorough in explanations. "
+                else:
+                    context_prefix = "The user is looking for quick information from team documentation. Be concise and direct. "
+                
+                response_data = rag_engine.query(last_user_input, context_prefix)
+                answer_text = response_data["answer"]
+                sources = response_data["sources"]
+                
+                # Append answer with sources metadata
+                st.session_state.messages.append({
+                    "role": "assistant", 
+                    "content": answer_text,
+                    "sources": sources
+                })
+                
+                # 🎙️ Voice Narration Feature
+                try:
+                    from voice_engine import VoiceEngine
+                    voice_engine = VoiceEngine()
+                    
+                    # 1. Summarize for voice
+                    voice_script = rag_engine.summarize_for_voice(answer_text)
+                    
+                    # 2. Generate Audio
+                    audio_bytes = voice_engine.generate_audio(voice_script)
+                    
+                    # Add message with audio to history
+                    msg_data = {"role": "assistant", "content": f"🎙️ *Narrator:* {voice_script}", "is_voice": True}
+                    if audio_bytes:
+                        msg_data["audio"] = audio_bytes
+                        # Play immediately for this run too (optional, but good for UX)
+                        
+                    st.session_state.messages.append(msg_data)
+                
+                except Exception as ve:
+                    # Don't crash app if voice fails
+                    print(f"Voice error: {ve}")
+
+                # Show initialization error if any
+                if hasattr(rag_engine, 'init_error') and rag_engine.init_error:
+                    st.error(f"⚠️ Watsonx Initialization Error: {rag_engine.init_error}")
+                    st.session_state.messages.append({"role": "assistant", "content": f"Debugging info: {rag_engine.init_error}"})
+                
+                st.rerun()
+                
+            except Exception as e:
+                error_msg = f"I encountered an error: {str(e)}\n\nPlease make sure your IBM API key is configured correctly in the `.env` file."
+                st.session_state.messages.append({"role": "assistant", "content": error_msg})
+                st.rerun()
 
 def render_sidebar():
     """Render the sidebar with info and stats."""
@@ -335,6 +418,9 @@ def render_sidebar():
             st.metric("Documents", "5", delta=None)
         with col2:
             st.metric("Topics", "12", delta=None)
+        
+        st.markdown("")
+        st.metric("Knowledge Gaps", "3", delta="High Priority", delta_color="inverse")
         
         st.markdown("---")
         

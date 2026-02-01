@@ -31,6 +31,7 @@ class RAGEngine:
         self.vector_store = None
         
         # Initialize watsonx.ai client
+        self.init_error = None
         self._init_watsonx()
     
     def _safe_print(self, text: str):
@@ -55,9 +56,9 @@ class RAGEngine:
             )
             
             # Initialize the model - using Granite
-            # Using IBM Granite 13B Instruct v2 for generation
+            # Using IBM Granite 3.0 8B Instruct for generation
             self.model = ModelInference(
-                model_id="ibm/granite-13b-instruct-v2",
+                model_id="ibm/granite-3-8b-instruct",
                 credentials=self.credentials,
                 project_id=self.project_id,
                 params={
@@ -75,11 +76,33 @@ class RAGEngine:
             
         except ImportError:
             self._safe_print("⚠️ ibm-watsonx-ai not installed. Using fallback mode.")
+            self.init_error = "ibm-watsonx-ai library not found."
             self.model = None
         except Exception as e:
-            self._safe_print(f"⚠️ Error initializing watsonx: {e}")
+            error_msg = f"CRITICAL ERROR initializing watsonx: {str(e)}"
+            self._safe_print(f"❌ {error_msg}")
+            # Print detailed error for debugging
+            import traceback
+            traceback.print_exc()
+            self.init_error = str(e)
             self.model = None
     
+    def _scan_for_secrets(self, content: str, filename: str) -> bool:
+        """Scan content for potential secrets (basic regex). Returns True if safe."""
+        import re
+        # Basic patterns for AWS keys, private keys, etc.
+        patterns = [
+            r"AKIA[0-9A-Z]{16}",  # AWS Key
+            r"-----BEGIN PRIVATE KEY-----",
+            r"ghp_[a-zA-Z0-9]{36}"  # Github Token
+        ]
+        
+        for pattern in patterns:
+            if re.search(pattern, content):
+                self._safe_print(f"⚠️ SECURITY ALERT: Found potential secret in {filename}. Skipping.")
+                return False
+        return True
+
     def load_documents(self, knowledge_base_path: str):
         """Load documents from the knowledge base directory."""
         kb_path = Path(knowledge_base_path)
@@ -92,6 +115,11 @@ class RAGEngine:
         for md_file in kb_path.rglob("*.md"):
             try:
                 content = md_file.read_text(encoding="utf-8")
+                
+                # 🔒 Security Scan
+                if not self._scan_for_secrets(content, md_file.name):
+                    continue
+
                 self.documents.append({
                     "path": str(md_file),
                     "filename": md_file.name,
@@ -218,16 +246,11 @@ class RAGEngine:
             scored_chunks.sort(key=lambda x: x[0], reverse=True)
             return [chunk for _, chunk in scored_chunks[:top_k]]
     
-    def query(self, user_query: str, context_prefix: str = "") -> str:
+    def query(self, user_query: str, context_prefix: str = "") -> dict:
         """
         Process a user query using RAG.
-        
-        Args:
-            user_query: The user's question
-            context_prefix: Additional context about the mode
-            
         Returns:
-            Generated response
+            dict: {"answer": str, "sources": list}
         """
         # Retrieve relevant chunks
         relevant_chunks = self._retrieve_relevant_chunks(user_query, top_k=3)
@@ -239,10 +262,13 @@ class RAGEngine:
         ])
         
         # Build prompt
-        prompt = f"""You are TeamMind AI, a helpful assistant for team knowledge and onboarding.
+        prompt = f"""You are TeamMind AI.
 {context_prefix}
 
-Use the following context from team documentation to answer the question. If the answer is not in the context, say so but try to be helpful.
+Guidelines:
+1. Use ONLY the provided context.
+2. If the answer is not in the context, say "I cannot find this in the documents."
+3. Do not hallucinate credentials or commands not present.
 
 CONTEXT:
 {context}
@@ -251,21 +277,53 @@ USER QUESTION: {user_query}
 
 HELPFUL ANSWER:"""
         
+        response_text = ""
+        
         # Generate response
         if self.model:
             try:
-                response = self.model.generate_text(prompt=prompt)
-                return response.strip()
+                response_text = self.model.generate_text(prompt=prompt).strip()
             except Exception as e:
-                return f"Error generating response: {str(e)}"
+                response_text = f"Error generating response: {str(e)}"
         else:
             # Fallback response when model not available
             return self._fallback_response(user_query, relevant_chunks)
+            
+        return {
+            "answer": response_text,
+            "sources": relevant_chunks
+        }
     
-    def _fallback_response(self, query: str, chunks: List[dict]) -> str:
+    def summarize_for_voice(self, long_text: str) -> str:
+        """Summarize long text into a casual 1-2 sentence voice script."""
+        if not self.model:
+            # Fallback if model is down: just take the first sentence
+            return long_text.split('.')[0] + "."
+            
+        prompt = f"""You are a helpful team narrator.
+Summarize the following technical explanation into a friendly, casual audio script.
+Keep it under 2 sentences. Make it sound encouraging.
+
+TEXT:
+{long_text}
+
+AUDIO SCRIPT:"""
+        
+        try:
+            response = self.model.generate_text(prompt=prompt)
+            # Clean up response (sometimes models output extra newlines or quotes)
+            return response.strip().replace('"', '')
+        except Exception as e:
+            self._safe_print(f"⚠️ Error summarizing for voice: {e}")
+            return long_text[:150] + "..."
+
+    def _fallback_response(self, query: str, chunks: List[dict]) -> dict:
         """Generate a fallback response when model is not available."""
         if not chunks:
-            return "I don't have specific information about that in my knowledge base. Please check with your team lead or the team wiki."
+            return {
+                "answer": "I don't have specific information about that in my knowledge base. Please check with your team lead or the team wiki.",
+                "sources": []
+            }
         
         response = "Based on our team documentation, here's what I found:\n\n"
         
@@ -277,9 +335,12 @@ HELPFUL ANSWER:"""
             
             response += f"📄 **From {chunk['source']}**:\n{snippet}\n\n"
         
-        response += "\n*Note: Running in fallback mode. Configure your IBM API key for full AI-powered responses.*"
+        response += "\n*Note: Running in fallback mode.*"
         
-        return response
+        return {
+            "answer": response,
+            "sources": chunks
+        }
 
 
 # Test the RAG engine

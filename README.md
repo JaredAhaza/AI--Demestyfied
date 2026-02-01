@@ -17,63 +17,95 @@ Teams lose countless hours to knowledge fragmentation:
 
 ## 💡 Our Solution
 
-**TeamMind AI** is an intelligent assistant that serves dual purposes:
+**TeamMind AI** is an intelligent assistant that acts as a single source of truth for your team, powered by IBM watsonx.ai.
 
-### 🎓 Onboarding Mode
-- Guided onboarding with contextual answers
-- Proactively suggests information new hires commonly need
-- Reduces time-to-productivity for new team members
-
-### 📚 Knowledge Mode
-- Instant answers from team documentation, SOPs, and past decisions
-- Reduces interruptions and speeds up daily work
-- Preserves institutional knowledge
+### ✨ Key Features
+*   **🎓 Onboarding Mode**: Guided experience specifically tailored for new hires.
+*   **📚 Knowledge Mode**: Instant technical answers for existing team members.
+*   **🎙️ Voice Narrator** (New!): Uses ElevenLabs to audibly summarize complex technical details into friendly, casual explainers.
+*   **⚡ Quick Actions**: One-click solutions for common team questions.
 
 ## 🛠️ Technology Stack
 
-- **IBM watsonx.ai** - Foundation model inference and AI capabilities
-- **IBM Granite** - Open-source, efficient language models
-- **Langflow** - Visual AI workflow builder for RAG pipelines
-- **RAG (Retrieval-Augmented Generation)** - Knowledge-grounded responses
+*   **IBM watsonx.ai**: Powering the core AI capabilities.
+*   **IBM Granite 3.0 (8B Instruct)**: The high-performance foundation model for text generation and summarization.
+*   **RAG (Retrieval-Augmented Generation)**: Grounds answers in your actual team documentation (`knowledge-base/` folder).
+*   **ChromaDB**: Vector storage for semantic search.
+*   **Streamlit**: Fast, interactive web interface.
+*   **ElevenLabs**: Text-to-Speech synthesis for the Voice Narrator.
 
 ## 🏗️ Architecture
 
-```
-User Interface (Web Chat)
-         │
-         ▼
-    Langflow RAG Pipeline
-         │
-    ┌────┴────┐
-    ▼         ▼
-Vector DB   IBM Granite
-(Knowledge) (via watsonx.ai)
+```mermaid
+graph LR
+    User[User] --> UI[Streamlit UI]
+    UI --> RAG[RAG Engine]
+    RAG --> Chroma[ChromaDB Vector Store]
+    RAG --> WatsonX[IBM watsonx.ai (Granite 3.0)]
+    UI --> Voice[Voice Engine]
+    Voice --> Eleven[ElevenLabs API]
 ```
 
 ## 🚀 Quick Start
 
-```bash
-# Install dependencies
-npm install
+### Prerequisites
+*   Python 3.10+
+*   IBM Cloud API Key
+*   ElevenLabs API Key (Optional, for voice)
 
-# Start the development server
-npm run dev
-```
+### Installation
+
+1.  **Clone the repository**
+    ```bash
+    git clone https://github.com/your-repo/TeamMind-AI.git
+    cd TeamMind-AI
+    ```
+
+2.  **Create virtual environment**
+    ```bash
+    python -m venv venv
+    source venv/bin/activate  # Windows: venv\Scripts\activate
+    ```
+
+3.  **Install dependencies**
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+4.  **Configure environment**
+    Create a `.env` file with your credentials:
+    ```env
+    IBM_API_KEY=your_ibm_key
+    WATSONX_PROJECT_ID=your_project_id
+    WATSONX_URL=https://us-south.ml.cloud.ibm.com
+    ELEVENLABS_API_KEY=your_elevenlabs_key
+    ```
+
+5.  **Run the application**
+    ```bash
+    streamlit run app.py
+    ```
 
 ## 📁 Project Structure
 
 ```
 AI--Demestyfied/
-├── frontend/          # Web interface
-├── backend/           # API server
-├── knowledge-base/    # Sample team documents
-├── langflow/          # Langflow workflow configs
-└── docs/              # Documentation
+├── app.py              # Main Streamlit Application
+├── rag_engine.py       # Core RAG Logic (Watsonx + ChromaDB)
+├── voice_engine.py     # Voice Synthesis Logic (ElevenLabs)
+├── requirements.txt    # Python Dependencies
+├── .env                # Configuration Secrets
+└── knowledge-base/     # Team Documentation (Markdown)
+    ├── team-docs/
+    │   ├── onboarding-guide.md
+    │   ├── deployment-process.md
+    │   └── ...
+    └── faqs/
 ```
 
 ## 👥 Team
 
-- [Your Name]
+- **Jared Ahaza** - *Lead Developer*
 
 ## 📝 License
 
